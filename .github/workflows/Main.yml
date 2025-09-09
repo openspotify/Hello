@@ -1,35 +1,35 @@
-name: RDP
+name: RDP + Exit Node
 
 on:
   workflow_dispatch:
 
 jobs:
-  secure-rdp:
+  windows-rdp:
     runs-on: windows-latest
-    timeout-minutes: 3600
+    timeout-minutes: 360
 
     steps:
-      - name: Configure RDP + Firewall
+      - name: Configure RDP
         run: |
+          # Enable RDP
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
 
-          netsh advfirewall firewall delete rule name="RDP-Tailscale"
-          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389
+          # Firewall rule for RDP
+          netsh advfirewall firewall delete rule name="RDP-Allow"
+          netsh advfirewall firewall add rule name="RDP-Allow" dir=in action=allow protocol=TCP localport=3389
+
           Restart-Service -Name TermService -Force
 
       - name: Create Fixed RDP User
         run: |
-          $password = "abhash@#&12+-"
-          $securePass = ConvertTo-SecureString $password -AsPlainText -Force
-          if (-not (Get-LocalUser -Name "Abhashpatel" -ErrorAction SilentlyContinue)) {
-              New-LocalUser -Name "Abhashpatel" -Password $securePass -AccountNeverExpires
+          $password = ConvertTo-SecureString "Abhash@#&12+-" -AsPlainText -Force
+          if (-not (Get-LocalUser -Name "AbhashPatel" -ErrorAction SilentlyContinue)) {
+            New-LocalUser -Name "AbhashPatel" -Password $password -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member "AbhashPatel"
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "AbhashPatel"
           }
-          Add-LocalGroupMember -Group "Administrators" -Member "Abhashpatel"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "Abhashpatel"
-          echo "RDP_USERNAME=Abhashpatel" >> $env:GITHUB_ENV
-          echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
       - name: Install Tailscale
         run: |
@@ -39,26 +39,24 @@ jobs:
           Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
           Remove-Item $installerPath -Force
 
-      - name: Start Tailscale
+      - name: Connect Tailscale + Exit Node
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname=abhash-rdp
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
+            --hostname=abhash-rdp `
+            --advertise-exit-node
 
-      - name: Fetch Tailscale Info
-        run: |
+          # Print the assigned IP/domain
           $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          $tsDomain = (& "$env:ProgramFiles\Tailscale\tailscale.exe" status --json | ConvertFrom-Json).Self.DNSName
-          echo "TAILSCALE_IP=$tsIP" >> $env:GITHUB_ENV
-          echo "TAILSCALE_DOMAIN=$tsDomain" >> $env:GITHUB_ENV
+          Write-Host "Tailscale IP: $tsIP"
 
-      - name: Show Connection Details
+      - name: Keep Alive
         run: |
-          Write-Host "`n=== RDP ACCESS ==="
-          Write-Host "Tailscale Address: $env:TAILSCALE_DOMAIN"
-          Write-Host "Or use IP: $env:TAILSCALE_IP"
-          Write-Host "Username: $env:RDP_USERNAME"
-          Write-Host "Password: $env:RDP_PASSWORD"
-          Write-Host "==================`n"
+          Write-Host "`n=== RDP & Exit Node READY ==="
+          Write-Host "Username: AbhashPatel"
+          Write-Host "Password: Abhash@#&12+-"
+          Write-Host "================================"
           while ($true) {
-              Write-Host "[$(Get-Date)] RDP Active"
-              Start-Sleep -Seconds 300
+            Write-Host "[$(Get-Date)] Running..."
+            Start-Sleep -Seconds 300
           }
