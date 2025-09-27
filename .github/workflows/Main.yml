@@ -1,10 +1,10 @@
-name: RDP-WireGuard-VPN-Setup
+name: Setup ZeroTier on RDP
 
 on:
   workflow_dispatch:
 
 jobs:
-  setup-vpn:
+  zerotier-setup:
     runs-on: ubuntu-latest
     steps:
       - name: Update System
@@ -12,51 +12,21 @@ jobs:
           sudo apt update
           sudo apt upgrade -y
 
-      - name: Install WireGuard
+      - name: Install ZeroTier
         run: |
-          sudo apt install -y wireguard
+          curl -s https://install.zerotier.com | sudo bash
+          sudo systemctl enable zerotier-one
+          sudo systemctl start zerotier-one
 
-      - name: Generate Server Keys
+      - name: Join ZeroTier Network
         run: |
-          mkdir -p ~/wireguard-keys
-          wg genkey | tee ~/wireguard-keys/server_private.key | wg pubkey > ~/wireguard-keys/server_public.key
+          NETWORK_ID="gzDZdpaTV4EJ6hNagOfQ2IddcaR3VGsh"
+          sudo zerotier-cli join $NETWORK_ID
+          sleep 5
+          STATUS=$(sudo zerotier-cli info)
+          echo "ZeroTier Status: $STATUS"
 
-      - name: Generate Client Keys
+      - name: Get ZeroTier IP
         run: |
-          wg genkey | tee ~/wireguard-keys/client_private.key | wg pubkey > ~/wireguard-keys/client_public.key
-
-      - name: Configure WireGuard Server
-        run: |
-          SERVER_PRIVATE_KEY=$(cat ~/wireguard-keys/server_private.key)
-          CLIENT_PUBLIC_KEY=$(cat ~/wireguard-keys/client_public.key)
-          sudo bash -c 'cat > /etc/wireguard/wg0.conf <<EOF
-[Interface]
-Address = 10.0.0.1/24
-ListenPort = 51820
-PrivateKey = '$SERVER_PRIVATE_KEY'
-
-[Peer]
-PublicKey = '$CLIENT_PUBLIC_KEY'
-AllowedIPs = 10.0.0.2/32
-EOF'
-
-      - name: Enable and Start WireGuard
-        run: |
-          sudo systemctl enable wg-quick@wg0
-          sudo wg-quick up wg0
-
-      - name: Output Client Config for Phone
-        run: |
-          CLIENT_PRIVATE_KEY=$(cat ~/wireguard-keys/client_private.key)
-          SERVER_PUBLIC_KEY=$(cat ~/wireguard-keys/server_public.key)
-          SERVER_IP=$(curl -s ifconfig.me)
-          echo "[Interface]
-PrivateKey = $CLIENT_PRIVATE_KEY
-Address = 10.0.0.2/24
-
-[Peer]
-PublicKey = $SERVER_PUBLIC_KEY
-Endpoint = $SERVER_IP:51820
-AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 25" > ~/wireguard-keys/client-phone.conf
-          cat ~/wireguard-keys/client-phone.conf
+          ZT_IP=$(ip addr show zt0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+          echo "Your RDP ZeroTier IP is: $ZT_IP"
