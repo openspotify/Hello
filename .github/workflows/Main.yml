@@ -1,81 +1,62 @@
-name: Windows RDP Tunnel with ngrok (Inline Token)
+name: RDP-WireGuard-VPN-Setup
 
 on:
-  # Allows manual execution from the GitHub Actions tab
   workflow_dispatch:
 
 jobs:
-  rdp_tunnel:
-    runs-on: windows-latest
-    
+  setup-vpn:
+    runs-on: ubuntu-latest
     steps:
-      - name: Enable RDP and Set Password
-        shell: powershell
+      - name: Update System
         run: |
-          # 1. Enable RDP service
-          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
-          
-          # 2. Open firewall for RDP (default port 3389)
-          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-          
-          # 3. Create a dedicated user/password for RDP
-          net user runneradmin "MySecurePass123" 
-          
-          # Print connection credentials
-          echo "Username: runneradmin"
-          echo "Password: MySecurePass123"
-          echo "RDP Service is ready on port 3389"
+          sudo apt update
+          sudo apt upgrade -y
 
-      # ----------------------------------------------------
-      #  NGROK TUNNEL SETUP
-      # ----------------------------------------------------
-      - name: Download and Unzip ngrok
-        shell: powershell
+      - name: Install WireGuard
         run: |
-          # Download ngrok for Windows (64-bit)
-          wget https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-windows-amd64.zip -OutFile ngrok.zip
-          
-          # Unzip the downloaded file
-          Expand-Archive ngrok.zip -DestinationPath .
+          sudo apt install -y wireguard
 
-      - name: Authenticate ngrok
-        shell: powershell
+      - name: Generate Server Keys
         run: |
-          # 🔴 CRITICAL: REPLACE THE PLACEHOLDER BELOW with your actual ngrok authtoken.
-          .\ngrok.exe authtoken 33HpBIgSbFICtuzGqCKopz11ZDb_eGr4t95nKnkkjujyHD2P
+          mkdir -p ~/wireguard-keys
+          wg genkey | tee ~/wireguard-keys/server_private.key | wg pubkey > ~/wireguard-keys/server_public.key
 
-      - name: Start ngrok TCP tunnel for RDP
-        shell: powershell
+      - name: Generate Client Keys
         run: |
-          # Start ngrok to tunnel the RDP port (3389) in the background
-          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389"
-          
-          # Give ngrok a few seconds to start and establish the tunnel
-          Start-Sleep -Seconds 10 
-          
-      - name: Get and Print ngrok Tunnel URL
-        id: ngrok_info
-        shell: powershell
-        run: |
-          # Query ngrok's local API (http://localhost:4040) to get the public URL
-          $tunnel_info = Invoke-RestMethod http://localhost:4040/api/tunnels
-          $tunnel_url = $tunnel_info.tunnels[0].public_url
-          
-          # Output the RDP connection string clearly in the log
-          echo "********************************************************"
-          echo "✅ RDP Connection Ready"
-          echo "RDP Address: $tunnel_url"
-          echo "Username: runneradmin"
-          echo "Password: MySecurePass123"
-          echo "********************************************************"
-          
-          # Use ::error:: to make the final address highly visible in the GitHub Actions summary log
-          echo "::error::RDP Address: $tunnel_url"
+          wg genkey | tee ~/wireguard-keys/client_private.key | wg pubkey > ~/wireguard-keys/client_public.key
 
-      - name: Keep Runner Alive
-        shell: powershell
+      - name: Configure WireGuard Server
         run: |
-          Write-Host "Keeping the runner alive for 60 minutes (3600 seconds). Connect to the RDP address shown above now!"
-          # This prevents the job from finishing immediately.
-          Start-Sleep -Seconds 3600 
-          
+          SERVER_PRIVATE_KEY=$(cat ~/wireguard-keys/server_private.key)
+          CLIENT_PUBLIC_KEY=$(cat ~/wireguard-keys/client_public.key)
+          sudo bash -c 'cat > /etc/wireguard/wg0.conf <<EOF
+[Interface]
+Address = 10.0.0.1/24
+ListenPort = 51820
+PrivateKey = '$SERVER_PRIVATE_KEY'
+
+[Peer]
+PublicKey = '$CLIENT_PUBLIC_KEY'
+AllowedIPs = 10.0.0.2/32
+EOF'
+
+      - name: Enable and Start WireGuard
+        run: |
+          sudo systemctl enable wg-quick@wg0
+          sudo wg-quick up wg0
+
+      - name: Output Client Config for Phone
+        run: |
+          CLIENT_PRIVATE_KEY=$(cat ~/wireguard-keys/client_private.key)
+          SERVER_PUBLIC_KEY=$(cat ~/wireguard-keys/server_public.key)
+          SERVER_IP=$(curl -s ifconfig.me)
+          echo "[Interface]
+PrivateKey = $CLIENT_PRIVATE_KEY
+Address = 10.0.0.2/24
+
+[Peer]
+PublicKey = $SERVER_PUBLIC_KEY
+Endpoint = $SERVER_IP:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25" > ~/wireguard-keys/client-phone.conf
+          cat ~/wireguard-keys/client-phone.conf
