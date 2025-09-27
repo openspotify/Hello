@@ -1,62 +1,45 @@
-name: RDP + Exit Node
+name: Windows RDP with Proxy
 
 on:
   workflow_dispatch:
 
 jobs:
-  windows-rdp:
+  rdp:
     runs-on: windows-latest
-    timeout-minutes: 360
-
     steps:
-      - name: Configure RDP
+      - name: Enable RDP
         run: |
-          # Enable RDP
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 0 -Force
-
-          # Firewall rule for RDP
-          netsh advfirewall firewall delete rule name="RDP-Allow"
-          netsh advfirewall firewall add rule name="RDP-Allow" dir=in action=allow protocol=TCP localport=3389
-
-          Restart-Service -Name TermService -Force
-
-      - name: Create Fixed RDP User
+          Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          net user runneradmin "MySecurePass123"  # password for RDP
+      - name: Print RDP Info
         run: |
-          $password = ConvertTo-SecureString "Abhash@#&12+-" -AsPlainText -Force
-          if (-not (Get-LocalUser -Name "AbhashPatel" -ErrorAction SilentlyContinue)) {
-            New-LocalUser -Name "AbhashPatel" -Password $password -AccountNeverExpires
-            Add-LocalGroupMember -Group "Administrators" -Member "AbhashPatel"
-            Add-LocalGroupMember -Group "Remote Desktop Users" -Member "AbhashPatel"
-          }
+          echo "RDP IP: $env:COMPUTERNAME"
+          echo "Username: runneradmin"
+          echo "Password: MySecurePass123"
 
-      - name: Install Tailscale
+  proxy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
         run: |
-          $tsUrl = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
-          $installerPath = "$env:TEMP\tailscale.msi"
-          Invoke-WebRequest -Uri $tsUrl -OutFile $installerPath
-          Start-Process msiexec.exe -ArgumentList "/i", "`"$installerPath`"", "/quiet", "/norestart" -Wait
-          Remove-Item $installerPath -Force
+          sudo apt update
+          sudo apt install -y tinyproxy unzip wget
 
-      - name: Connect Tailscale + Exit Node
+      - name: Configure tinyproxy
         run: |
-          & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
-            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
-            --hostname=abhash-rdp `
-            --advertise-exit-node
+          sudo sed -i 's/Allow 127.0.0.1/Allow 0.0.0.0/g' /etc/tinyproxy/tinyproxy.conf
+          sudo sed -i 's/^#Port 8888/Port 8888/' /etc/tinyproxy/tinyproxy.conf
+          sudo systemctl restart tinyproxy
 
-          # Print the assigned IP/domain
-          $tsIP = & "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4
-          Write-Host "Tailscale IP: $tsIP"
-
-      - name: Keep Alive
+      - name: Download ngrok
         run: |
-          Write-Host "`n=== RDP & Exit Node READY ==="
-          Write-Host "Username: AbhashPatel"
-          Write-Host "Password: Abhash@#&12+-"
-          Write-Host "================================"
-          while ($true) {
-            Write-Host "[$(Get-Date)] Running..."
-            Start-Sleep -Seconds 300
-          }
+          wget https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-amd64.zip
+          unzip ngrok-stable-linux-amd64.zip
+          ./ngrok authtoken 33HpBIgSbFICtuzGqCKopz11ZDb_eGr4t95nKnkkjujyHD2P
+
+      - name: Start ngrok TCP tunnel
+        run: |
+          nohup ./ngrok tcp 8888 &
+          sleep 10
+          curl -s localhost:4040/api/tunnels
