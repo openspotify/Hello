@@ -19,7 +19,7 @@ jobs:
 
       - name: Join ZeroTier Network
         run: |
-          NETWORK_ID="gzDZdpaTV4EJ6hNagOfQ2IddcaR3VGsh"
+          NETWORK_ID="45b6e887e2a5665f"
           sudo zerotier-cli join $NETWORK_ID
           sleep 5
           STATUS=$(sudo zerotier-cli info)
