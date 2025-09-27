@@ -1,4 +1,4 @@
-name: Setup ZeroTier on RDP
+name: Setup ZeroTier on RDP (Fast)
 
 on:
   workflow_dispatch:
@@ -7,10 +7,9 @@ jobs:
   zerotier-setup:
     runs-on: ubuntu-latest
     steps:
-      - name: Update System
+      - name: Update Package Index
         run: |
           sudo apt update
-          sudo apt upgrade -y
 
       - name: Install ZeroTier
         run: |
